@@ -16,7 +16,7 @@ export const HOMEPAGE_SPOT_COUNT = 4;
 export const HOMEPAGE_SPOT_PRICE = "$500";
 
 /** Stripe Payment Link for the monthly spot subscription. */
-export const SPONSOR_SPOT_CHECKOUT_URL = "https://buy.stripe.com/REPLACE_ME";
+export const SPONSOR_SPOT_CHECKOUT_URL = "https://buy.stripe.com/8x24gBczR7LNaokcve2sM00";
 
 export const SPONSOR_CONTACT_EMAIL = "hello@paseo.sh";
 
