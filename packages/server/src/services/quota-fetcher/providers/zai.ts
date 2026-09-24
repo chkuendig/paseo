@@ -92,23 +92,27 @@ function zaiWindowBase(limit: ZaiLimit): ZaiWindowBase {
 
 // The client uses window ids as React keys, so two limits on the same window (z.ai
 // reports separate request limits per feature set) must not collide.
-function uniqueWindowId(baseId: string, seenIds: Set<string>): string {
-  let id = baseId;
+function uniqueWindowId(input: { baseId: string; seenIds: Set<string> }): string {
+  let id = input.baseId;
   let suffix = 2;
-  while (seenIds.has(id)) {
-    id = `${baseId}_${suffix}`;
+  while (input.seenIds.has(id)) {
+    id = `${input.baseId}_${suffix}`;
     suffix += 1;
   }
-  seenIds.add(id);
+  input.seenIds.add(id);
   return id;
 }
 
-function zaiWindowFromLimit(limit: ZaiLimit, seenIds: Set<string>): ProviderUsageWindow | null {
+function zaiWindowFromLimit(input: {
+  limit: ZaiLimit;
+  seenIds: Set<string>;
+}): ProviderUsageWindow | null {
+  const { limit, seenIds } = input;
   if (typeof limit.percentage !== "number") return null;
   const base = zaiWindowBase(limit);
   const kind = limit.type ? ZAI_LIMIT_KIND_LABEL[limit.type] : undefined;
   return windowFromUsedPct({
-    id: uniqueWindowId(kind ? `${base.id}_${kind.toLowerCase()}` : base.id, seenIds),
+    id: uniqueWindowId({ baseId: kind ? `${base.id}_${kind.toLowerCase()}` : base.id, seenIds }),
     label: kind ? `${base.label} ${kind}` : base.label,
     utilizationPct: limit.percentage,
     resetsAt:
@@ -117,9 +121,12 @@ function zaiWindowFromLimit(limit: ZaiLimit, seenIds: Set<string>): ProviderUsag
   });
 }
 
-function zaiPlanLabel(subscription: ZaiSubscription | null, quota: ZaiQuota | null): string | null {
-  if (subscription?.productName) return subscription.productName;
-  const level = quota?.level;
+function zaiPlanLabel(input: {
+  subscription: ZaiSubscription | null;
+  quota: ZaiQuota;
+}): string | null {
+  if (input.subscription?.productName) return input.subscription.productName;
+  const level = input.quota.level;
   if (!level) return null;
   return level.charAt(0).toUpperCase() + level.slice(1);
 }
@@ -154,7 +161,9 @@ export class ZaiQuotaProvider implements ProviderUsageFetcher {
       this.fetchQuota(token),
     ]);
 
-    if (!subscription && !quota) return unavailableUsage(this);
+    // The usage bars only ever come from quota — without it, "available" with no
+    // windows would render the same empty card this provider exists to fix.
+    if (!quota) return unavailableUsage(this);
 
     const details: ProviderUsageDetail[] = [];
     if (subscription?.status) {
@@ -163,11 +172,11 @@ export class ZaiQuotaProvider implements ProviderUsageFetcher {
 
     const seenWindowIds = new Set<string>();
     const windows: ProviderUsageWindow[] = [];
-    for (const limit of quota?.limits ?? []) {
-      const window = zaiWindowFromLimit(limit, seenWindowIds);
+    for (const limit of quota.limits ?? []) {
+      const window = zaiWindowFromLimit({ limit, seenIds: seenWindowIds });
       if (window) windows.push(window);
     }
-    if (quota && windows.length === 0) {
+    if (windows.length === 0) {
       this.logger.warn("Z.ai quota response parsed but produced no windows");
     }
 
@@ -175,7 +184,7 @@ export class ZaiQuotaProvider implements ProviderUsageFetcher {
       providerId: this.providerId,
       displayName: this.displayName,
       status: "available",
-      planLabel: zaiPlanLabel(subscription, quota),
+      planLabel: zaiPlanLabel({ subscription, quota }),
       windows,
       balances: [],
       details,
@@ -183,17 +192,17 @@ export class ZaiQuotaProvider implements ProviderUsageFetcher {
     };
   }
 
-  private fetchJson(url: string, token: string): Promise<Response> {
-    return fetchProviderApi(this.fetchApi, url, {
+  private fetchJson(input: { url: string; token: string }): Promise<Response> {
+    return fetchProviderApi(this.fetchApi, input.url, {
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${input.token}`,
         Accept: "application/json",
       },
     });
   }
 
   private async fetchSubscription(token: string): Promise<ZaiSubscription | null> {
-    const res = await this.fetchJson("https://api.z.ai/api/biz/subscription/list", token);
+    const res = await this.fetchJson({ url: "https://api.z.ai/api/biz/subscription/list", token });
     if (!res.ok) {
       this.logger.debug({ status: res.status }, "Z.ai subscription fetch failed");
       return null;
@@ -211,7 +220,10 @@ export class ZaiQuotaProvider implements ProviderUsageFetcher {
   }
 
   private async fetchQuota(token: string): Promise<ZaiQuota | null> {
-    const res = await this.fetchJson("https://api.z.ai/api/monitor/usage/quota/limit", token);
+    const res = await this.fetchJson({
+      url: "https://api.z.ai/api/monitor/usage/quota/limit",
+      token,
+    });
     if (!res.ok) {
       this.logger.debug({ status: res.status }, "Z.ai quota fetch failed");
       return null;

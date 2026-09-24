@@ -961,6 +961,25 @@ describe("real provider usage fetchers", () => {
     });
   });
 
+  it("reports Z.ai unavailable when quota fails even though subscription succeeds", async () => {
+    process.env["ZAI_API_KEY"] = "zai_test_token";
+    fetchApi = mockFetch(
+      new Map([
+        [
+          "https://api.z.ai/api/biz/subscription/list",
+          () => jsonResponse({ data: [{ productName: "GLM Coding Max", status: "VALID" }] }),
+        ],
+        ["https://api.z.ai/api/monitor/usage/quota/limit", () => jsonResponse({}, 500)],
+      ]),
+    );
+
+    const zai = findProvider(await service().listUsage(), "zai");
+
+    // A plan label with no bars is the exact empty card this provider fixes, so a
+    // quota-only failure must degrade to unavailable rather than render one.
+    expect(zai).toMatchObject({ status: "unavailable", planLabel: null, windows: [] });
+  });
+
   it("treats a Z.ai HTTP 200 envelope with success:false as unavailable", async () => {
     process.env["ZAI_API_KEY"] = "zai_bad_token";
     const rejected = () =>
