@@ -927,14 +927,15 @@ describe("real provider usage fetchers", () => {
     });
   });
 
-  it("keeps Z.ai quota windows when the subscription request throws", async () => {
+  it("keeps Z.ai quota windows when the subscription request fails at the network", async () => {
     process.env["ZAI_API_KEY"] = "zai_test_token";
     fetchApi = mockFetch(
       new Map([
         [
           "https://api.z.ai/api/biz/subscription/list",
           () => {
-            throw new Error("socket hang up");
+            // undici's shape for a connection-level failure.
+            throw new TypeError("fetch failed");
           },
         ],
         [
@@ -959,6 +960,25 @@ describe("real provider usage fetchers", () => {
       error: null,
       windows: [expect.objectContaining({ id: "5h_tokens", label: "5-hour Tokens", usedPct: 40 })],
     });
+  });
+
+  it("surfaces a malformed Z.ai subscription response as an error, not a silent fallback", async () => {
+    process.env["ZAI_API_KEY"] = "zai_test_token";
+    fetchApi = mockFetch(
+      new Map([
+        // data must be an array; a shape change should be seen, not degrade forever.
+        ["https://api.z.ai/api/biz/subscription/list", () => jsonResponse({ data: "nope" })],
+        [
+          "https://api.z.ai/api/monitor/usage/quota/limit",
+          () => jsonResponse({ success: true, data: { level: "pro", limits: [] } }),
+        ],
+      ]),
+    );
+
+    const zai = findProvider(await service().listUsage(), "zai");
+
+    expect(zai?.status).toBe("error");
+    expect(zai?.error).toBeTruthy();
   });
 
   it("reports Z.ai unavailable when quota fails even though subscription succeeds", async () => {

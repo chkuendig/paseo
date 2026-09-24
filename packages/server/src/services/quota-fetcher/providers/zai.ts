@@ -131,6 +131,15 @@ function zaiPlanLabel(input: {
   return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
+// undici reports network failures as a TypeError and fetchProviderApi's
+// AbortSignal.timeout as a DOMException named TimeoutError (AbortError on an
+// externally aborted signal). Only these are safe to swallow for enrichment
+// data; anything else — schema drift, programming errors — must propagate.
+function isZaiTransportError(err: unknown): boolean {
+  if (err instanceof TypeError) return true;
+  return err instanceof DOMException && (err.name === "TimeoutError" || err.name === "AbortError");
+}
+
 interface ZaiQuotaProviderOptions {
   logger: Logger;
   fetch?: ProviderApiFetch;
@@ -153,8 +162,10 @@ export class ZaiQuotaProvider implements ProviderUsageFetcher {
     if (!token) return unavailableUsage(this);
 
     const [subscription, quota] = await Promise.all([
-      // Subscription only enriches the plan label; it must never take the quota bars down.
+      // Subscription only enriches the plan label; an unreachable endpoint must
+      // never take the quota bars down. Everything else rethrows.
       this.fetchSubscription(token).catch((err: unknown) => {
+        if (!isZaiTransportError(err)) throw err;
         this.logger.debug({ err }, "Z.ai subscription fetch failed");
         return null;
       }),
